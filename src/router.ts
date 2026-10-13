@@ -161,23 +161,52 @@ route('GET', '/api/settings/status', async (_req, env) => {
 
 // ─── Automated Web Search & Scan ────────────────────────────────────
 
+let lastSearchDebug = '';
+
 async function googleSearch(query: string, env: Env): Promise<Array<{ title: string; url: string; snippet: string }>> {
   const apiKey = await env.DB.prepare("SELECT value FROM settings WHERE key = 'google_api_key'").first<{ value: string }>();
   const cx = await env.DB.prepare("SELECT value FROM settings WHERE key = 'google_cx'").first<{ value: string }>();
 
-  if (!apiKey?.value || !cx?.value) return [];
+  if (!apiKey?.value || !cx?.value) {
+    lastSearchDebug = 'API key or CX not configured';
+    return [];
+  }
 
   const url = `https://www.googleapis.com/customsearch/v1?key=${encodeURIComponent(apiKey.value)}&cx=${encodeURIComponent(cx.value)}&q=${encodeURIComponent(query)}&num=5`;
   const resp = await fetch(url);
-  if (!resp.ok) return [];
 
-  const data = await resp.json() as { items?: Array<{ title: string; link: string; snippet: string }> };
+  if (!resp.ok) {
+    const errText = await resp.text();
+    lastSearchDebug = `Google API ${resp.status}: ${errText.substring(0, 500)}`;
+    return [];
+  }
+
+  const data = await resp.json() as { items?: Array<{ title: string; link: string; snippet: string }>; searchInformation?: { totalResults: string } };
+  lastSearchDebug = `OK: ${data.searchInformation?.totalResults ?? '0'} total results, ${data.items?.length ?? 0} returned`;
   return (data.items ?? []).map(item => ({
     title: item.title,
     url: item.link,
     snippet: item.snippet || '',
   }));
 }
+
+route('GET', '/api/debug-search', async (_req, env) => {
+  const apiKey = await env.DB.prepare("SELECT value FROM settings WHERE key = 'google_api_key'").first<{ value: string }>();
+  const cx = await env.DB.prepare("SELECT value FROM settings WHERE key = 'google_cx'").first<{ value: string }>();
+
+  if (!apiKey?.value || !cx?.value) {
+    return json({ error: 'API key or CX not set', hasKey: !!apiKey?.value, hasCx: !!cx?.value });
+  }
+
+  const testQuery = '"Marc Benioff" Salesforce CEO';
+  const results = await googleSearch(testQuery, env);
+  return json({
+    query: testQuery,
+    debug: lastSearchDebug,
+    result_count: results.length,
+    results: results.slice(0, 3).map(r => ({ title: r.title, url: r.url })),
+  });
+});
 
 route('POST', '/api/scan/:executiveId', async (_req, env, params) => {
   const executiveId = params.executiveId;
@@ -310,6 +339,7 @@ route('POST', '/api/scan/:executiveId', async (_req, env, params) => {
     saved_sources: savedSources,
     total_sources: allSources?.length ?? 0,
     top_power_words: topPowerWords.slice(0, 5),
+    debug: lastSearchDebug,
   });
 });
 
