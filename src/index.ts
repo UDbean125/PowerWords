@@ -41,6 +41,10 @@ async function ensureDb(env: Env) {
 				analyzed_at TEXT NOT NULL DEFAULT (datetime('now')),
 				FOREIGN KEY (executive_id) REFERENCES executives(id) ON DELETE CASCADE
 			)`),
+			env.DB.prepare(`CREATE TABLE IF NOT EXISTS settings (
+				key TEXT PRIMARY KEY NOT NULL,
+				value TEXT NOT NULL
+			)`),
 		]);
 		dbInitialized = true;
 	} catch {

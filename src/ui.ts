@@ -186,6 +186,7 @@ export function renderApp(): string {
   let executives = [];
   let powerWordsData = [];
   let currentView = 'home';
+  let apiConfigured = false;
 
   async function api(method, path, body) {
     const opts = { method, headers: { 'Content-Type': 'application/json' } };
@@ -215,16 +216,24 @@ export function renderApp(): string {
     if (currentView === 'home') renderHome();
     else if (currentView === 'account') renderAccount();
     else if (currentView === 'pitch') renderPitch();
+    else if (currentView === 'settings') renderSettings();
   }
 
   // ─── HOME ───
   function renderHome() {
     document.getElementById('app').innerHTML = \`
       <div class="navbar">
-        <span></span>
+        <button class="navbar-action" onclick="openSettings()" style="font-size:20px;">&#9881;</button>
         <span class="navbar-title">PowerWords</span>
         <button class="navbar-action" onclick="showAddAccount()">+ Add</button>
       </div>
+      \${!apiConfigured ? \`
+      <div class="section">
+        <div class="tip-box" style="background:linear-gradient(135deg,#FFF8E8,#FFE8E8);">
+          <strong style="color:var(--orange);">Setup Required:</strong> Tap the &#9881; gear icon to add your Google API key so auto-scan can find executive communications. You can also add sources manually without it.
+        </div>
+      </div>
+      \` : ''}
       <div class="page-header">
         <h1>Accounts</h1>
         <p>Your target companies</p>
@@ -320,6 +329,7 @@ export function renderApp(): string {
       </div>
       \` : ''}
 
+      \${apiConfigured ? \`
       <div class="section">
         <button class="scan-btn" id="scanAllBtn" onclick="scanAll()">
           &#128269; Scan All Executives
@@ -328,6 +338,14 @@ export function renderApp(): string {
           Searches the web for annual reports, interviews, earnings calls & more
         </p>
       </div>
+      \` : \`
+      <div class="section">
+        <div class="tip-box" style="background:linear-gradient(135deg,#FFF8E8,#FFE8E8); text-align:center;">
+          <strong style="color:var(--orange);">Auto-scan not configured</strong><br>
+          <span style="font-size:13px;">Add your Google API key in <a href="#" onclick="event.preventDefault(); openSettings()" style="color:var(--blue);">Settings</a>, or add sources manually with the + Source button on each exec.</span>
+        </div>
+      </div>
+      \`}
 
       <div id="addExecSection" class="section hidden">
         <div class="section-label">Add Executive</div>
@@ -382,14 +400,16 @@ export function renderApp(): string {
               <div class="row-title">\${esc(e.name)}</div>
               <div class="row-sub">\${esc(e.title)}\${sourceCount > 0 ? ' &middot; ' + sourceCount + ' sources' : ''}</div>
             </div>
-            <button class="scan-btn" style="width:auto; padding:6px 14px; font-size:13px; border-radius:16px;" onclick="scanExec(\${e.id}, this)">Scan</button>
+            \${apiConfigured ? \`<button class="scan-btn" style="width:auto; padding:6px 14px; font-size:13px; border-radius:16px;" onclick="scanExec(\${e.id}, this)">Scan</button>\` : ''}
+            <button class="scan-btn" style="width:auto; padding:6px 14px; font-size:13px; border-radius:16px; background:var(--green);" onclick="showManualSource(\${e.id})">+ Source</button>
             <button style="background:none; border:none; color:var(--label3); font-size:20px; cursor:pointer; padding:4px;" onclick="deleteExec(\${e.id})">&times;</button>
           </div>
+          <div id="manual-source-\${e.id}" class="hidden" style="margin-top:10px;"></div>
           \${words.length > 0 ? \`
             <div class="pw-tags">
               \${words.slice(0, 5).map((w, i) => \`<span class="pw-tag pw-tag-\${i+1}">\${esc(w.word)} <span class="pw-count">\${w.frequency}x</span></span>\`).join('')}
             </div>
-          \` : '<div style="font-size:13px; color:var(--label3); margin-top:4px;">Not scanned yet</div>'}
+          \` : '<div style="font-size:13px; color:var(--label3); margin-top:4px;">' + (apiConfigured ? 'Not scanned yet' : 'Tap + Source to add content') + '</div>'}
         </div>
       \`;
     }).join('');
@@ -589,6 +609,123 @@ export function renderApp(): string {
     \`;
   }
 
+  // ─── MANUAL SOURCE ───
+  function showManualSource(execId) {
+    const el = document.getElementById('manual-source-' + execId);
+    el.classList.remove('hidden');
+    el.innerHTML = \`
+      <div class="section-card" style="margin:0;">
+        <div class="form-row">
+          <label>Title</label>
+          <input id="ms-title-\${execId}" placeholder="e.g. 2025 Annual Report" autocomplete="off" />
+        </div>
+        <div class="form-row">
+          <label>Type</label>
+          <select id="ms-type-\${execId}" style="flex:1; border:none; font-size:17px; padding:12px 0; background:transparent; font-family:inherit;">
+            <option value="annual_report">Annual Report</option>
+            <option value="interview">Interview</option>
+            <option value="earnings_call">Earnings Call</option>
+            <option value="keynote">Keynote / Speech</option>
+            <option value="blog_post">Blog Post</option>
+            <option value="press_release">Press Release</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:8px;">
+        <textarea id="ms-content-\${execId}" rows="5" placeholder="Paste the text from the executive's speech, report, interview, etc." style="width:100%; border:1px solid var(--sep); border-radius:var(--radius); padding:12px; font-size:15px; font-family:inherit; resize:vertical;"></textarea>
+      </div>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <button class="scan-btn" style="flex:1; background:var(--green);" onclick="saveManualSource(\${execId})">Save & Analyze</button>
+        <button class="scan-btn" style="flex:1; background:var(--label3);" onclick="document.getElementById('manual-source-\${execId}').classList.add('hidden')">Cancel</button>
+      </div>
+    \`;
+  }
+
+  async function saveManualSource(execId) {
+    const title = document.getElementById('ms-title-' + execId).value.trim();
+    const source_type = document.getElementById('ms-type-' + execId).value;
+    const content = document.getElementById('ms-content-' + execId).value.trim();
+    if (!title) return toast('Title is required', 'error');
+    if (!content || content.length < 20) return toast('Paste at least a paragraph of text', 'error');
+    try {
+      await api('POST', '/api/sources', { executive_id: execId, source_type, title, content });
+      toast('Source added');
+      document.getElementById('manual-source-' + execId).classList.add('hidden');
+      // Auto-analyze
+      await api('POST', '/api/analyze/' + execId);
+      powerWordsData = await api('GET', '/api/accounts/' + selectedAccount.id + '/power-words');
+      renderExecList();
+      toast('Analysis complete!');
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  // ─── SETTINGS ───
+  function openSettings() {
+    currentView = 'settings';
+    render();
+  }
+
+  async function renderSettings() {
+    let settings = {};
+    try { settings = await api('GET', '/api/settings'); } catch {}
+
+    document.getElementById('app').innerHTML = \`
+      <div class="navbar">
+        <button class="navbar-back" onclick="goHome()">&#8249; Back</button>
+        <span class="navbar-title">Settings</span>
+        <span></span>
+      </div>
+      <div class="page-header">
+        <h1>API Setup</h1>
+        <p>Connect Google Custom Search for auto-scanning</p>
+      </div>
+      <div class="section">
+        <div class="tip-box">
+          <strong>How to get your keys (free):</strong><br>
+          1. Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:var(--blue);">Google Cloud Console</a> and create an API key<br>
+          2. Enable the "Custom Search JSON API" in your project<br>
+          3. Go to <a href="https://programmablesearchengine.google.com/controlpanel/all" target="_blank" style="color:var(--blue);">Programmable Search Engine</a> and create a search engine<br>
+          4. Set it to search the entire web<br>
+          5. Copy the Search Engine ID (cx)
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-label">Google Custom Search API</div>
+        <div class="section-card">
+          <div class="form-row">
+            <label>API Key</label>
+            <input id="inp-api-key" type="password" placeholder="AIza..." value="\${esc(settings.google_api_key || '')}" autocomplete="off" />
+          </div>
+          <div class="form-row">
+            <label style="width:120px;">Search Engine ID</label>
+            <input id="inp-cx" placeholder="abc123..." value="\${esc(settings.google_cx || '')}" autocomplete="off" />
+          </div>
+        </div>
+      </div>
+      <div class="section">
+        <button class="scan-btn" onclick="saveSettings()">Save Settings</button>
+      </div>
+      <div class="section">
+        <div style="font-size:13px; color:var(--label3); text-align:center;">
+          Free tier: 100 searches/day. Each executive scan uses ~5 searches.
+        </div>
+      </div>
+    \`;
+  }
+
+  async function saveSettings() {
+    const google_api_key = document.getElementById('inp-api-key').value.trim();
+    const google_cx = document.getElementById('inp-cx').value.trim();
+    if (!google_api_key || !google_cx) return toast('Both fields are required', 'error');
+    try {
+      await api('POST', '/api/settings', { google_api_key, google_cx });
+      apiConfigured = true;
+      toast('Settings saved! Auto-scan is now active.');
+      goHome();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
   function goHome() {
     currentView = 'home';
     selectedAccount = null;
@@ -598,9 +735,12 @@ export function renderApp(): string {
   // ─── Init ───
   (async () => {
     try {
-      await loadAccounts();
-    } catch (e) {
-      console.error('Failed to load accounts:', e);
+      const [, status] = await Promise.all([
+        loadAccounts().catch(() => { accounts = []; }),
+        api('GET', '/api/settings/status').catch(() => ({ configured: false })),
+      ]);
+      apiConfigured = status.configured;
+    } catch {
       accounts = [];
     }
     render();

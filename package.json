@@ -2,6 +2,7 @@
 	"name": "power-words",
 	"description": "CEO Power Words Analyzer — Automatically identifies C-level executives' most used power words.",
 	"devDependencies": {
+		"@cloudflare/workers-types": "^4.20260702.1",
 		"typescript": "5.9.3",
 		"wrangler": "4.51.0"
 	},

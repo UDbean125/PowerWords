@@ -127,7 +127,57 @@ route('DELETE', '/api/sources/:id', async (_req, env, params) => {
   return json({ success: true });
 });
 
+// ─── Settings ───────────────────────────────────────────────────────
+
+route('GET', '/api/settings', async (_req, env) => {
+  const { results } = await env.DB.prepare('SELECT key, value FROM settings').all<{ key: string; value: string }>();
+  const settings: Record<string, string> = {};
+  for (const row of results ?? []) {
+    settings[row.key] = row.key.includes('api_key') ? '••••' + row.value.slice(-4) : row.value;
+  }
+  return json(settings);
+});
+
+route('POST', '/api/settings', async (req, env) => {
+  const body = await req.json() as Record<string, string>;
+  const allowed = ['google_api_key', 'google_cx'];
+  const stmts = [];
+  for (const [key, value] of Object.entries(body)) {
+    if (!allowed.includes(key)) continue;
+    stmts.push(
+      env.DB.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?')
+        .bind(key, value, value)
+    );
+  }
+  if (stmts.length > 0) await env.DB.batch(stmts);
+  return json({ success: true });
+});
+
+route('GET', '/api/settings/status', async (_req, env) => {
+  const apiKey = await env.DB.prepare("SELECT value FROM settings WHERE key = 'google_api_key'").first<{ value: string }>();
+  const cx = await env.DB.prepare("SELECT value FROM settings WHERE key = 'google_cx'").first<{ value: string }>();
+  return json({ configured: !!(apiKey?.value && cx?.value) });
+});
+
 // ─── Automated Web Search & Scan ────────────────────────────────────
+
+async function googleSearch(query: string, env: Env): Promise<Array<{ title: string; url: string; snippet: string }>> {
+  const apiKey = await env.DB.prepare("SELECT value FROM settings WHERE key = 'google_api_key'").first<{ value: string }>();
+  const cx = await env.DB.prepare("SELECT value FROM settings WHERE key = 'google_cx'").first<{ value: string }>();
+
+  if (!apiKey?.value || !cx?.value) return [];
+
+  const url = `https://www.googleapis.com/customsearch/v1?key=${encodeURIComponent(apiKey.value)}&cx=${encodeURIComponent(cx.value)}&q=${encodeURIComponent(query)}&num=5`;
+  const resp = await fetch(url);
+  if (!resp.ok) return [];
+
+  const data = await resp.json() as { items?: Array<{ title: string; link: string; snippet: string }> };
+  return (data.items ?? []).map(item => ({
+    title: item.title,
+    url: item.link,
+    snippet: item.snippet || '',
+  }));
+}
 
 route('POST', '/api/scan/:executiveId', async (_req, env, params) => {
   const executiveId = params.executiveId;
@@ -137,6 +187,12 @@ route('POST', '/api/scan/:executiveId', async (_req, env, params) => {
   ).bind(executiveId).first<{ id: number; name: string; title: string; company_name: string }>();
 
   if (!exec) return error('Executive not found', 404);
+
+  // Check if Google API is configured
+  const apiStatus = await env.DB.prepare("SELECT value FROM settings WHERE key = 'google_api_key'").first<{ value: string }>();
+  if (!apiStatus?.value) {
+    return error('Google Custom Search API not configured. Go to Settings to add your API key and Search Engine ID.');
+  }
 
   const queries = [
     `"${exec.name}" ${exec.company_name} annual report letter shareholders`,
@@ -150,18 +206,7 @@ route('POST', '/api/scan/:executiveId', async (_req, env, params) => {
 
   for (const query of queries) {
     try {
-      const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=5`;
-      const resp = await fetch(searchUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; PowerWordsBot/1.0)',
-          'Accept': 'text/html',
-        },
-      });
-
-      if (!resp.ok) continue;
-      const html = await resp.text();
-
-      const results = parseSearchResults(html);
+      const results = await googleSearch(query, env);
       for (const r of results) {
         let source_type = 'other';
         const lowerTitle = (r.title + ' ' + r.snippet).toLowerCase();
@@ -400,40 +445,6 @@ route('GET', '/api/accounts/:id/pitch-summary', async (_req, env, params) => {
 });
 
 // ─── HTML Parsing Helpers ───────────────────────────────────────────
-
-function parseSearchResults(html: string): Array<{ title: string; url: string; snippet: string }> {
-  const results: Array<{ title: string; url: string; snippet: string }> = [];
-
-  const linkRegex = /<a[^>]+href="\/url\?q=([^"&]+)[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
-  let match;
-  while ((match = linkRegex.exec(html)) !== null) {
-    const url = decodeURIComponent(match[1]);
-    const titleHtml = match[2];
-    const title = titleHtml.replace(/<[^>]+>/g, '').trim();
-
-    if (!url.startsWith('http') || !title) continue;
-    if (url.includes('google.com') || url.includes('youtube.com') || url.includes('maps.google')) continue;
-
-    const afterMatch = html.substring(match.index + match[0].length, match.index + match[0].length + 2000);
-    const snippetMatch = afterMatch.match(/<span[^>]*>([\s\S]*?)<\/span>/);
-    const snippet = snippetMatch ? snippetMatch[1].replace(/<[^>]+>/g, '').trim() : '';
-
-    results.push({ title, url, snippet });
-  }
-
-  if (results.length === 0) {
-    const directLinkRegex = /<a[^>]+href="(https?:\/\/(?!www\.google)[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-    while ((match = directLinkRegex.exec(html)) !== null) {
-      const url = match[1];
-      const title = match[2].replace(/<[^>]+>/g, '').trim();
-      if (!title || title.length < 5) continue;
-      if (url.includes('google.com')) continue;
-      results.push({ title, url, snippet: '' });
-    }
-  }
-
-  return results.slice(0, 8);
-}
 
 function extractArticleText(html: string): string {
   let cleaned = html
