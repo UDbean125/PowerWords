@@ -1,0 +1,16 @@
+{
+	"compatibility_date": "2025-10-08",
+	"main": "src/index.ts",
+	"name": "power-words",
+	"upload_source_maps": true,
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+			"database_name": "power-words-db"
+		}
+	],
+	"observability": {
+		"enabled": true
+	}
+}

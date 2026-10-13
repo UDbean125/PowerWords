@@ -1,0 +1,15 @@
+{
+	"name": "power-words",
+	"description": "CEO Power Words Analyzer — Automatically identifies C-level executives' most used power words.",
+	"devDependencies": {
+		"typescript": "5.9.3",
+		"wrangler": "4.51.0"
+	},
+	"private": true,
+	"scripts": {
+		"cf-typegen": "wrangler types",
+		"check": "tsc && wrangler deploy --dry-run",
+		"deploy": "wrangler deploy",
+		"dev": "wrangler dev"
+	}
+}
