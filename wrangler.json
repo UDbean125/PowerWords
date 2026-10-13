@@ -6,7 +6,7 @@
 	"d1_databases": [
 		{
 			"binding": "DB",
-			"database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+			"database_id": "3229bcb9-00eb-4127-93ca-0e74bf394d1d",
 			"database_name": "power-words-db"
 		}
 	],
